@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { TopicStatus } from '../types';
 
 const DashboardPage: React.FC = () => {
-  const { profile, todayPlan, tomorrowPreview, topics, subjects, getTodayPlan, getTomorrowPreview, markTopicDone, markTopicHard, loading } = useApp();
+  const { profile, todayPlan, tomorrowPreview, topics, subjects, history, getTodayPlan, getTomorrowPreview, markTopicDone, markTopicHard, loading } = useApp();
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
@@ -22,6 +22,39 @@ const DashboardPage: React.FC = () => {
     }, 0);
     return { total, completed, remaining: Math.max(0, total - completed) };
   }, [todayPlan, topics]);
+
+  const syllabusProgress = useMemo(() => {
+    const totalTopics = topics.length;
+    if (totalTopics === 0) return { overall: 0, completed: 0, total: 0, subjectBreakdown: [], trend: 0 };
+
+    const completedTopics = topics.filter(t => t.status === TopicStatus.DONE).length;
+    const overall = (completedTopics / totalTopics) * 100;
+
+    const subjectBreakdown = subjects.map(s => {
+      const subjectTopics = topics.filter(t => t.subject_id === s.id);
+      const sTotal = subjectTopics.length;
+      const sCompleted = subjectTopics.filter(t => t.status === TopicStatus.DONE).length;
+      return {
+        name: s.name,
+        total: sTotal,
+        completed: sCompleted,
+        percentage: sTotal > 0 ? (sCompleted / sTotal) * 100 : 0
+      };
+    });
+
+    // Simple trend calculation: plans completed in last 7 days vs previous 7 days
+    const now = new Date();
+    const msInDay = 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = new Date(now.getTime() - 7 * msInDay);
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * msInDay);
+
+    const thisWeekPlans = history.filter(p => p.completed && new Date(p.date) >= sevenDaysAgo).length;
+    const lastWeekPlans = history.filter(p => p.completed && new Date(p.date) >= fourteenDaysAgo && new Date(p.date) < sevenDaysAgo).length;
+    
+    const trend = thisWeekPlans - lastWeekPlans;
+
+    return { overall, completed: completedTopics, total: totalTopics, subjectBreakdown, trend };
+  }, [topics, subjects, history]);
 
   const handleRegenerate = async () => {
     if (window.confirm("Would you like me to reconsider today's focus? This will replace your current plan.")) {
@@ -56,6 +89,74 @@ const DashboardPage: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      {/* Real-time Progress Summary Card */}
+      <section className="bg-white border border-slate-200 rounded-[2.5rem] p-10 shadow-sm space-y-10">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Curriculum Mastery</h3>
+            <div className="flex items-baseline gap-3">
+              <span className="text-6xl font-light text-emerald-900">{Math.round(syllabusProgress.overall)}%</span>
+              <span className="text-slate-400 text-lg">of syllabus mapped</span>
+            </div>
+          </div>
+          
+          <div className="flex flex-col items-end gap-2 text-right">
+            <div className="flex items-center gap-2 text-emerald-700 font-medium">
+              <span className="text-2xl">{syllabusProgress.completed}</span>
+              <span className="text-slate-300">/</span>
+              <span className="text-2xl text-slate-400">{syllabusProgress.total}</span>
+              <span className="text-sm text-slate-400 font-normal ml-1">topics</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {syllabusProgress.trend >= 0 ? (
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md uppercase tracking-tighter">
+                  +{syllabusProgress.trend} Sessions vs last week
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-md uppercase tracking-tighter">
+                  Subtle decrease in pace
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Global Progress Bar */}
+        <div className="w-full bg-slate-50 rounded-full h-4 overflow-hidden border border-slate-100 p-0.5">
+          <div 
+            className="bg-emerald-500 h-full rounded-full transition-all duration-1000 cubic-bezier(0.4, 0, 0.2, 1) shadow-lg shadow-emerald-200"
+            style={{ width: `${syllabusProgress.overall}%` }}
+          />
+        </div>
+
+        {/* Subject Breakdown Chart */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8 pt-4">
+          {syllabusProgress.subjectBreakdown.map((s, idx) => (
+            <div key={idx} className="space-y-3">
+              <div className="flex justify-between text-xs font-semibold">
+                <span className="text-slate-600 truncate mr-2">{s.name}</span>
+                <span className="text-emerald-700">{Math.round(s.percentage)}%</span>
+              </div>
+              <div className="w-full bg-slate-50 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className="bg-emerald-400 h-full transition-all duration-700"
+                  style={{ width: `${s.percentage}%` }}
+                />
+              </div>
+            </div>
+          ))}
+          {syllabusProgress.subjectBreakdown.length === 0 && (
+            <div className="col-span-full py-8 text-center text-slate-300 italic text-sm border-2 border-dashed border-slate-50 rounded-3xl">
+              Add subjects to track your progress breakdown.
+            </div>
+          )}
+        </div>
+
+        <div className="pt-6 border-t border-slate-50 text-center">
+          <p className="text-slate-400 text-sm italic font-light">"You’re steadily progressing. Every topic mastered is a step toward clarity."</p>
+        </div>
+      </section>
+
       {/* Calm Mentor Message */}
       <section className="relative overflow-hidden bg-white border border-slate-200 rounded-[2.5rem] p-10 md:p-14 shadow-sm">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-emerald-50 rounded-full opacity-50 blur-3xl"></div>
@@ -216,7 +317,7 @@ const DashboardPage: React.FC = () => {
         <aside className="space-y-8">
           <div className="bg-slate-900 text-white rounded-[2.5rem] p-10 space-y-10 shadow-2xl shadow-slate-200">
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-[0.3em] text-slate-500 mb-6">Today's Progress</h4>
+              <h4 className="text-xs font-bold uppercase tracking-[0.3em] text-slate-500 mb-6">Daily Energy</h4>
               <div className="space-y-6">
                 <div className="flex justify-between items-end">
                   <div className="space-y-1">
@@ -225,7 +326,7 @@ const DashboardPage: React.FC = () => {
                   </div>
                   <div className="text-right space-y-1">
                     <p className="text-3xl font-light">{Math.round((stats.completed / (stats.total || 1)) * 100)}%</p>
-                    <p className="text-xs text-slate-500 uppercase">Energy Spent</p>
+                    <p className="text-xs text-slate-500 uppercase">Goal Met</p>
                   </div>
                 </div>
                 <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
@@ -242,7 +343,7 @@ const DashboardPage: React.FC = () => {
                 <p className="text-2xl font-light text-emerald-400">
                   {Math.max(0, Math.ceil((new Date(profile?.exam_date || '').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))}
                 </p>
-                <p className="text-xs text-slate-500 uppercase tracking-widest">Days to Exam</p>
+                <p className="text-xs text-slate-500 uppercase tracking-widest">Days Left</p>
               </div>
               <div className="text-right">
                 <p className="text-2xl font-light text-white">

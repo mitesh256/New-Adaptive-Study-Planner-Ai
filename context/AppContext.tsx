@@ -47,7 +47,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const today = new Date().toISOString().split('T')[0];
         const todayPlan = history.find(p => p.date === today) || null;
 
-        setState({ profile, subjects, topics, todayPlan, history, tomorrowPreview: null });
+        // Ensure confidence_score exists for all topics
+        const normalizedTopics = topics.map(t => ({
+          ...t,
+          confidence_score: t.confidence_score ?? (t.status === TopicStatus.DONE ? 100 : 0)
+        }));
+
+        setState({ profile, subjects, topics: normalizedTopics, todayPlan, history, tomorrowPreview: null });
       } else {
         setState(prev => ({ ...prev, profile, tomorrowPreview: null }));
       }
@@ -116,11 +122,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!subject) return;
 
     const existingTopics = state.topics.filter(t => t.subject_id === subjectId);
-    
-    // Clear previous or show loading? For now just fetch.
     const newSuggestions = await suggestRelatedTopics(state.profile, subject, existingTopics);
     
-    // Filter out duplicates just in case AI fails safety
     const filteredSuggestions = newSuggestions.filter(s => 
       !state.topics.some(t => t.name.toLowerCase() === s.name.toLowerCase() && t.subject_id === subjectId)
     );
@@ -140,18 +143,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       estimated_hours: suggestion.estimated_hours,
       status: TopicStatus.PENDING,
       is_hard_marked: false,
-      exposure_count: 0
+      exposure_count: 0,
+      confidence_score: 0
     };
 
     await api.addTopic(newTopic);
     
-    // Update local state
     setState(prev => ({
       ...prev,
       topics: [...prev.topics, newTopic]
     }));
 
-    // Remove from suggestions
     rejectSuggestion(subjectId, suggestion.name);
   };
 
@@ -163,12 +165,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markTopicDone = async (topicId: string) => {
+    const targetTopic = state.topics.find(t => t.id === topicId);
+    if (!targetTopic) return;
+
+    const nextConfidence = Math.min(100, (targetTopic.confidence_score || 0) + 100);
+
     setState(prev => ({
       ...prev,
-      topics: prev.topics.map(t => t.id === topicId ? { ...t, status: TopicStatus.DONE, exposure_count: t.exposure_count + 1 } : t)
+      topics: prev.topics.map(t => t.id === topicId ? { 
+        ...t, 
+        status: TopicStatus.DONE, 
+        exposure_count: t.exposure_count + 1,
+        confidence_score: nextConfidence
+      } : t)
     }));
 
-    await api.updateTopic(topicId, { status: TopicStatus.DONE });
+    await api.updateTopic(topicId, { status: TopicStatus.DONE, confidence_score: nextConfidence });
     
     if (state.todayPlan) {
       const currentTopics = state.topics.map(t => t.id === topicId ? { ...t, status: TopicStatus.DONE } : t);
@@ -185,12 +197,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markTopicHard = async (topicId: string) => {
+    const topic = state.topics.find(t => t.id === topicId);
+    if (!topic) return;
+    
+    const nextHardMarked = !topic.is_hard_marked;
+    
     setState(prev => ({
       ...prev,
-      topics: prev.topics.map(t => t.id === topicId ? { ...t, is_hard_marked: !t.is_hard_marked } : t)
+      topics: prev.topics.map(t => t.id === topicId ? { ...t, is_hard_marked: nextHardMarked } : t)
     }));
-    const topic = state.topics.find(t => t.id === topicId);
-    await api.updateTopic(topicId, { is_hard_marked: !topic?.is_hard_marked });
+    await api.updateTopic(topicId, { is_hard_marked: nextHardMarked });
   };
 
   const logout = async () => {

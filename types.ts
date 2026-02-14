@@ -28,6 +28,7 @@ export interface Topic {
   status: TopicStatus;
   is_hard_marked: boolean;
   exposure_count: number;
+  confidence_score: number; // Mastery percentage 0-100
 }
 
 export interface TopicSuggestion {
